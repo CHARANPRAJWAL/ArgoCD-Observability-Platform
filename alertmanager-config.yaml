@@ -9,7 +9,7 @@ data:
     global:
       smtp_smarthost: 'localhost:587'
       smtp_from: 'alertmanager@yourdomain.com'
-      slack_api_url: 'https://hooks.slack.com/services/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'  # Replace with your webhook URL
+      slack_api_url: 'https://hooks.slack.com/xxxx/xxxx/xxxx'  # Replace with your webhook URL
     
     route:
       group_by: ['alertname', 'cluster', 'service']
