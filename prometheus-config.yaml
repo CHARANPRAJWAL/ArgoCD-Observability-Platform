@@ -1,0 +1,161 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+  namespace: monitoring
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 5s
+      evaluation_interval: 5s
+    
+    alerting:
+      alertmanagers:
+        - static_configs:
+            - targets:
+              - "alertmanager-service:9093"
+    
+    rule_files:
+      - "/etc/prometheus/argocd-rules.yml"
+    
+    scrape_configs:
+    - job_name: 'prometheus'
+      static_configs:
+      - targets: ['localhost:9090']
+    
+    - job_name: 'alertmanager'
+      static_configs:
+      - targets: ['alertmanager-service:9093']
+    
+    # ArgoCD Server Metrics
+    - job_name: 'argocd-server'
+      kubernetes_sd_configs:
+      - role: endpoints
+        namespaces:
+          names:
+          - argocd
+      relabel_configs:
+      - source_labels: [__meta_kubernetes_service_name]
+        action: keep
+        regex: argocd-server-metrics
+      - source_labels: [__meta_kubernetes_endpoint_port_name]
+        action: keep
+        regex: metrics
+    
+    # ArgoCD Application Controller Metrics
+    - job_name: 'argocd-application-controller'
+      kubernetes_sd_configs:
+      - role: endpoints
+        namespaces:
+          names:
+          - argocd
+      relabel_configs:
+      - source_labels: [__meta_kubernetes_service_name]
+        action: keep
+        regex: argocd-metrics
+      - source_labels: [__meta_kubernetes_endpoint_port_name]
+        action: keep
+        regex: metrics
+    
+    # Kubernetes Pods (for detecting when pods are down)
+    - job_name: 'kubernetes-pods'
+      kubernetes_sd_configs:
+      - role: pod
+        namespaces:
+          names:
+          - argocd
+      relabel_configs:
+      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+        action: keep
+        regex: true
+      - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+        action: replace
+        target_label: __metrics_path__
+        regex: (.+)
+      - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+        action: replace
+        regex: ([^:]+)(?::\d+)?;(\d+)
+        replacement: $1:$2
+        target_label: __address__
+
+  argocd-rules.yml: |
+    groups:
+    - name: argocd.demo
+      rules:
+      # ArgoCD Server Down - Using absent() function
+      - alert: ArgoCDServerDown
+        expr: absent(up{job="argocd-server"})
+        for: 5s
+        labels:
+          severity: critical
+          component: argocd-server
+        annotations:
+          summary: "🔥 ArgoCD Server is DOWN!"
+          description: "ArgoCD Server metrics are not available - server may be down or unreachable"
+      
+      # ArgoCD Application Controller Down - Using absent()
+      - alert: ArgoCDApplicationControllerDown
+        expr: absent(up{job="argocd-application-controller"})
+        for: 5s
+        labels:
+          severity: critical
+          component: argocd-controller
+        annotations:
+          summary: "⚠️ ArgoCD Application Controller is DOWN!"
+          description: "ArgoCD Application Controller metrics missing - controller may be down"
+      
+      # Alternative: Pod-based detection (more reliable)
+      - alert: ArgoCDServerPodDown
+        expr: kube_pod_status_ready{namespace="argocd", pod=~"argocd-server-.*"} == 0
+        for: 5s
+        labels:
+          severity: critical
+          component: argocd-server
+        annotations:
+          summary: "🔥 ArgoCD Server Pod Not Ready!"
+          description: "ArgoCD Server pod {{ $labels.pod }} is not in ready state"
+      
+      # High Prometheus Request Rate 
+      - alert: PrometheusHighActivity
+        expr: rate(prometheus_http_requests_total[30s]) > 10
+        for: 5s
+        labels:
+          severity: info
+          component: monitoring
+        annotations:
+          summary: "📊 High Monitoring Activity"
+          description: "Prometheus handling {{ $value | humanize }} requests/sec - system is active"
+      
+      # ArgoCD API Request Rate (if server is up)
+      - alert: ArgoCDServerActive
+        expr: rate(argocd_server_api_request_total[30s]) > 0
+        for: 10s
+        labels:
+          severity: info
+          component: argocd-server
+        annotations:
+          summary: "✅ ArgoCD Server is Processing Requests"
+          description: "ArgoCD Server handling {{ $value | humanize }} API requests/sec"
+
+    - name: argocd.kubernetes
+      rules:
+      # Kubernetes-based ArgoCD monitoring (more reliable)
+      - alert: ArgoCDServerReplicasDown
+        expr: kube_deployment_status_replicas_available{namespace="argocd", deployment="argocd-server"} == 0
+        for: 5s
+        labels:
+          severity: critical
+          component: argocd-server
+        annotations:
+          summary: "🔥 ArgoCD Server Has No Available Replicas!"
+          description: "ArgoCD Server deployment has 0 available replicas - service is down"
+      
+      - alert: ArgoCDControllerReplicasDown
+        expr: kube_deployment_status_replicas_available{namespace="argocd", deployment="argocd-application-controller"} == 0
+        for: 5s
+        labels:
+          severity: critical
+          component: argocd-controller
+        annotations:
+          summary: "⚠️ ArgoCD Controller Has No Available Replicas!"
+          description: "ArgoCD Application Controller has 0 available replicas - applications cannot sync"

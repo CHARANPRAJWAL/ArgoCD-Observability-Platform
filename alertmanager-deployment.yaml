@@ -1,0 +1,151 @@
+apiVersion: v1
+
+kind: ConfigMap
+
+metadata:
+
+  name: alertmanager-config
+
+  namespace: monitoring
+
+data:
+
+  alertmanager.yml: |
+
+    global:
+
+      slack_api_url: 'https://hooks.slack.com/services/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' 
+
+    
+
+    route:
+
+      group_by: ['alertname']
+
+      group_wait: 10s
+
+      group_interval: 10s
+
+      repeat_interval: 1h
+
+      receiver: 'slack-notifications'
+
+    
+
+    receivers:
+
+    - name: 'slack-notifications'
+
+      slack_configs:
+
+      - channel: '#general'  # Change to your preferred channel
+
+        username: 'ArgoCD AlertManager'
+
+        icon_emoji: ':warning:'
+
+        title: '🚨 ArgoCD Alert: {{ .GroupLabels.alertname }}'
+
+        text: |
+
+          {{ range .Alerts }}
+
+          Alert: {{ .Annotations.summary }}
+
+          Description: {{ .Annotations.description }}
+
+          Severity: {{ .Labels.severity }}
+
+          {{ end }}
+
+        send_resolved: true
+
+---
+
+apiVersion: apps/v1
+
+kind: Deployment
+
+metadata:
+
+  name: alertmanager
+
+  namespace: monitoring
+
+spec:
+
+  replicas: 1
+
+  selector:
+
+    matchLabels:
+
+      app: alertmanager
+
+  template:
+
+    metadata:
+
+      labels:
+
+        app: alertmanager
+
+    spec:
+
+      containers:
+
+      - name: alertmanager
+
+        image: prom/alertmanager:v0.26.0
+
+        args:
+
+          - '--config.file=/etc/alertmanager/alertmanager.yml'
+
+          - '--storage.path=/alertmanager'
+
+          - '--web.external-url=http://localhost:9093'
+
+          - '--log.level=debug'
+
+        ports:
+
+        - containerPort: 9093
+
+        volumeMounts:
+
+        - name: config-volume
+
+          mountPath: /etc/alertmanager
+
+        - name: storage-volume
+
+          mountPath: /alertmanager
+
+      volumes:
+
+      - name: config-volume
+
+        configMap:
+
+          name: alertmanager-config
+
+      - name: storage-volume
+
+        emptyDir: {}
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: alertmanager-service
+  namespace: monitoring
+spec:
+  selector:
+    app: alertmanager
+  ports:
+    - protocol: TCP
+      port: 9093
+      targetPort: 9093
+

@@ -1,0 +1,103 @@
+# alertmanager-config.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alertmanager-config
+  namespace: monitoring
+data:
+  alertmanager.yml: |
+    global:
+      smtp_smarthost: 'localhost:587'
+      smtp_from: 'alertmanager@yourdomain.com'
+      slack_api_url: 'https://hooks.slack.com/services/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'  # Replace with your webhook URL
+    
+    route:
+      group_by: ['alertname', 'cluster', 'service']
+      group_wait: 10s
+      group_interval: 10s
+      repeat_interval: 1h
+      receiver: 'argocd-alerts'
+      routes:
+      - match:
+          severity: critical
+        receiver: 'argocd-critical'
+      - match:
+          alertname: ArgoCDAppHealthDegraded
+        receiver: 'argocd-health-alerts'
+      - match:
+          alertname: ArgoCDAppSyncFailed
+        receiver: 'argocd-sync-alerts'
+    
+    receivers:
+    - name: 'argocd-alerts'
+      slack_configs:
+      - channel: 'argo-alerts'  # Change to your preferred channel
+        username: 'ArgoCD AlertManager'
+        icon_emoji: ':warning:'
+        title: 'ArgoCD Alert - {{ .GroupLabels.alertname }}'
+        text: |
+          {{ range .Alerts }}
+          *Alert:* {{ .Annotations.summary }}
+          *Description:* {{ .Annotations.description }}
+          *Severity:* {{ .Labels.severity }}
+          *Application:* {{ .Labels.name }}
+          *Namespace:* {{ .Labels.namespace }}
+          *Status:* {{ .Status }}
+          {{ end }}
+        send_resolved: true
+    
+    - name: 'argocd-critical'
+      slack_configs:
+      - channel: 'argo-alerts'  # Change to your preferred channel
+        username: 'ArgoCD Critical Alert'
+        icon_emoji: ':rotating_light:'
+        title: '🚨 CRITICAL: ArgoCD Alert - {{ .GroupLabels.alertname }}'
+        text: |
+          {{ range .Alerts }}
+          *🔥 CRITICAL ALERT 🔥*
+          *Alert:* {{ .Annotations.summary }}
+          *Description:* {{ .Annotations.description }}
+          *Application:* {{ .Labels.name }}
+          *Namespace:* {{ .Labels.namespace }}
+          *Time:* {{ .StartsAt.Format "2006-01-02 15:04:05" }}
+          {{ end }}
+        send_resolved: true
+    
+    - name: 'argocd-health-alerts'
+      slack_configs:
+      - channel: 'argo-alerts'  # Change to your preferred channel
+        username: 'ArgoCD Health Monitor'
+        icon_emoji: ':heart:'
+        title: '💔 Health Issue: {{ .GroupLabels.alertname }}'
+        text: |
+          {{ range .Alerts }}
+          *Application Health Issue*
+          *App:* {{ .Labels.name }}
+          *Health Status:* {{ .Labels.health_status }}
+          *Namespace:* {{ .Labels.namespace }}
+          *Duration:* {{ .Annotations.description }}
+          {{ end }}
+        send_resolved: true
+    
+    - name: 'argocd-sync-alerts'
+      slack_configs:
+      - channel: 'argo-alerts'  # Change to your preferred channel
+        username: 'ArgoCD Sync Monitor'
+        icon_emoji: ':arrows_counterclockwise:'
+        title: '🔄 Sync Issue: {{ .GroupLabels.alertname }}'
+        text: |
+          {{ range .Alerts }}
+          *Application Sync Issue*
+          *App:* {{ .Labels.name }}
+          *Sync Status:* {{ .Labels.sync_status }}
+          *Namespace:* {{ .Labels.namespace }}
+          *Details:* {{ .Annotations.description }}
+          {{ end }}
+        send_resolved: true
+    
+    inhibit_rules:
+    - source_match:
+        severity: 'critical'
+      target_match:
+        severity: 'warning'
+      equal: ['alertname', 'name', 'namespace']
